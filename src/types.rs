@@ -329,6 +329,24 @@ unsafe impl RefSafe for ExportDirectory {}
 
 #[repr(packed)]
 #[derive(Clone, Debug)]
+pub struct ImportDirectory {
+    pub original_first_thunk: RVA<ImageThunkData>,
+    pub time_date_stamp: u32,
+    pub forwarder_chain: u32,
+    pub name: RVA<[CChar]>,
+    pub first_thunk: RVA<ImageThunkData>,
+}
+unsafe impl RefSafe for ImportDirectory {}
+
+#[repr(packed)]
+#[derive(Clone, Debug)]
+pub struct ImageThunkData {
+    pub thing: u64,
+}
+unsafe impl RefSafe for ImageThunkData {}
+
+#[repr(packed)]
+#[derive(Clone, Debug)]
 pub struct RawExportAddress(pub RVA<()>);
 unsafe impl RefSafe for RawExportAddress {}
 
