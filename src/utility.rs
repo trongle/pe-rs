@@ -9,21 +9,21 @@
  * of the License.
  */
 
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::ffi::OsStr;
-use std::ops::Add;
-use std::mem::{transmute,size_of};
-use std::slice::from_raw_parts;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::marker::PhantomData;
+use std::mem::{size_of, transmute};
+use std::ops::Add;
+use std::slice::from_raw_parts;
 
 /// Unsafe relative pointer type
-pub trait URP<T: ?Sized> : Copy {
-	fn new(addr: u32) -> Self;
+pub trait URP<T: ?Sized>: Copy {
+    fn new(addr: u32) -> Self;
 }
 
 pub trait URPConvert<T: ?Sized, U: ?Sized> {
-	type Out;
-	fn offset(self, by: u32) -> Self::Out;
+    type Out;
+    fn offset(self, by: u32) -> Self::Out;
 }
 
 macro_rules! define_urp {
@@ -42,27 +42,38 @@ macro_rules! define_urp {
 		impl<T: ?Sized, U: ?Sized> ::std::cmp::PartialEq<$URP<U>> for $URP<T> {
 			#[inline]
 			fn eq(&self, other: &$URP<U>) -> bool {
-				self.0.eq(&other.0)
+				let value = unsafe { std::ptr::addr_of!(self.0).read_unaligned() };
+				let other_value = unsafe { std::ptr::addr_of!(other.0).read_unaligned() };
+
+				value.eq(&other_value)
 			}
 		}
 		impl<T: ?Sized, U: ?Sized> ::std::cmp::PartialOrd<$URP<U>> for $URP<T> {
 			#[inline]
 			fn partial_cmp(&self, other: &$URP<U>) -> ::std::option::Option<::std::cmp::Ordering> {
-				self.0.partial_cmp(&other.0)
+				let value = unsafe { std::ptr::addr_of!(self.0).read_unaligned() };
+				let other_value = unsafe { std::ptr::addr_of!(other.0).read_unaligned() };
+
+				value.partial_cmp(&other_value)
 			}
 		}
 		impl<T: ?Sized> ::std::cmp::Eq for $URP<T> {}
 		impl<T: ?Sized> ::std::cmp::Ord for $URP<T> {
 			#[inline]
 			fn cmp(&self, other: &$URP<T>) -> ::std::cmp::Ordering {
-				self.0.cmp(&other.0)
+				let value = unsafe { std::ptr::addr_of!(self.0).read_unaligned() };
+				let other_value = unsafe { std::ptr::addr_of!(other.0).read_unaligned() };
+
+				value.cmp(&other_value)
 			}
 		}
 		impl<T: ?Sized> ::std::fmt::Debug for $URP<T> {
 			#[inline]
 			fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+				let value = unsafe { std::ptr::addr_of!(self.0).read_unaligned() };
+
 				let mut builder = f.debug_tuple(concat!(stringify!($URP),"<T>"));
-				builder.field(&self.0);
+				builder.field(&value);
 				builder.finish()
 			}
 		}
@@ -120,38 +131,41 @@ macro_rules! define_urp {
 	}
 }
 
-define_urp!{pub struct FP<T>;}
-define_urp!{pub struct RVA<T>;}
+define_urp! {pub struct FP<T>;}
+define_urp! {pub struct RVA<T>;}
 
 #[repr(packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct CChar(u8);
 
 trait NullTerminatedStr {
-	fn null_terminated(&self) -> Option<&Self>;
+    fn null_terminated(&self) -> Option<&Self>;
 }
 
 impl NullTerminatedStr for [CChar] {
-	fn null_terminated(&self) -> Option<&Self> {
-		self.iter().position(|&CChar(v)|v==0).map(|pos|&self[..pos])
-	}
+    fn null_terminated(&self) -> Option<&Self> {
+        self.iter()
+            .position(|&CChar(v)| v == 0)
+            .map(|pos| &self[..pos])
+    }
 }
 
 pub trait AsOsStr {
-	fn as_os_str(&self) -> &OsStr;
+    fn as_os_str(&self) -> &OsStr;
 }
 
 impl AsOsStr for [CChar] {
-	fn as_os_str(&self) -> &OsStr {
-		let cstr=self.null_terminated().unwrap_or(&self);
-		unsafe{transmute::<&[CChar],&str>(cstr).as_ref()}
-	}
+    fn as_os_str(&self) -> &OsStr {
+        let cstr = self.null_terminated().unwrap_or(&self);
+        unsafe { transmute::<&[CChar], &str>(cstr).as_ref() }
+    }
 }
 
 // This trait must only be implemented by types that are 4 bytes
 pub unsafe trait Size4Bytes: Sized {
-	#[doc(hidden)]
-	unsafe fn _check_size(_: Self) {/* you can implement a size check here */}
+    #[doc(hidden)]
+    unsafe fn _check_size(_: Self) { /* you can implement a size check here */
+    }
 }
 unsafe impl Size4Bytes for u32 {}
 unsafe impl Size4Bytes for i32 {}
@@ -176,64 +190,70 @@ unsafe impl RefSafe for RVA<[CChar]> {}
 
 #[derive(Debug)]
 pub enum Error {
-	/// Not a PE file
-	NotPe,
-	/// A size specified was not enough to contain the data specified
-	InvalidSize,
-	/// The requested mapping does not exist in the file or is not contiguous in the file
-	ResolveMapError,
-	/// The requested directory does not exist in the file
-	DirectoryMissing,
-	/// The requested symbol does not exist in the symbol table
-	SymbolNotFound,
-	/// The requested ordinal does not exist in the export table, this probably indicates a malformed file
-	ExportNotFound,
-	Io(IoError),
+    /// Not a PE file
+    NotPe,
+    /// A size specified was not enough to contain the data specified
+    InvalidSize,
+    /// The requested mapping does not exist in the file or is not contiguous in the file
+    ResolveMapError,
+    /// The requested directory does not exist in the file
+    DirectoryMissing,
+    /// The requested symbol does not exist in the symbol table
+    SymbolNotFound,
+    /// The requested ordinal does not exist in the export table, this probably indicates a malformed file
+    ExportNotFound,
+    Io(IoError),
 }
 
-pub type Result<T>=::std::result::Result<T,Error>;
+pub type Result<T> = ::std::result::Result<T, Error>;
 
 impl From<IoError> for Error {
-	fn from(err: IoError) -> Error {
-		Error::Io(err)
-	}
+    fn from(err: IoError) -> Error {
+        Error::Io(err)
+    }
 }
 
 pub trait FPRef<'data> {
-	fn ref_at<T: RefSafe>(&'data self, fp: FP<T>) -> Result<&'data T>;
-	fn ref_slice_at<T: RefSafe>(&'data self, fp: FP<[T]>, count: u32) -> Result<&'data [T]>;
-	fn ref_cstr_at(&'data self, fp: FP<[CChar]>, maxlen: Option<u32>) -> Result<&'data [CChar]>;
+    fn ref_at<T: RefSafe>(&'data self, fp: FP<T>) -> Result<&'data T>;
+    fn ref_slice_at<T: RefSafe>(&'data self, fp: FP<[T]>, count: u32) -> Result<&'data [T]>;
+    fn ref_cstr_at(&'data self, fp: FP<[CChar]>, maxlen: Option<u32>) -> Result<&'data [CChar]>;
 }
 
 impl<'data> FPRef<'data> for [u8] {
-	fn ref_at<T: RefSafe>(&'data self, fp: FP<T>) -> Result<&'data T> {
-		if fp+size_of::<T>()>self.len() {
-			return Err(IoError::new(IoErrorKind::UnexpectedEof,"input buffer not long enough").into())
-		}
-		unsafe{
-			let ptr=self.as_ptr().offset(fp.get() as isize) as *const T;
-			Ok(&*ptr)
-		}
-	}
+    fn ref_at<T: RefSafe>(&'data self, fp: FP<T>) -> Result<&'data T> {
+        if fp + size_of::<T>() > self.len() {
+            return Err(
+                IoError::new(IoErrorKind::UnexpectedEof, "input buffer not long enough").into(),
+            );
+        }
+        unsafe {
+            let ptr = self.as_ptr().offset(fp.get() as isize) as *const T;
+            Ok(&*ptr)
+        }
+    }
 
-	fn ref_slice_at<T: RefSafe>(&'data self, fp: FP<[T]>, count: u32) -> Result<&'data [T]> {
-		if (fp+(count as usize*size_of::<T>()))>self.len() {
-			return Err(IoError::new(IoErrorKind::UnexpectedEof,"input buffer not long enough").into())
-		}
-		unsafe{
-			let ptr=self.as_ptr().offset(fp.get() as isize) as *const T;
-			Ok(from_raw_parts(ptr,count as usize))
-		}
-	}
+    fn ref_slice_at<T: RefSafe>(&'data self, fp: FP<[T]>, count: u32) -> Result<&'data [T]> {
+        if (fp + (count as usize * size_of::<T>())) > self.len() {
+            return Err(
+                IoError::new(IoErrorKind::UnexpectedEof, "input buffer not long enough").into(),
+            );
+        }
+        unsafe {
+            let ptr = self.as_ptr().offset(fp.get() as isize) as *const T;
+            Ok(from_raw_parts(ptr, count as usize))
+        }
+    }
 
-	fn ref_cstr_at(&'data self, fp: FP<[CChar]>, maxlen: Option<u32>) -> Result<&'data [CChar]> {
-		let start = fp.get() as usize;
-		let end = maxlen.map(|len| start + len as usize).unwrap_or(self.len());
-		let data=&self[start..end];
-		let cstr=unsafe{transmute::<&[u8],&[CChar]>(data)};
-		match cstr.null_terminated() {
-			None => Err(IoError::new(IoErrorKind::UnexpectedEof,"could not find NULL terminator").into()),
-			Some(strz) => Ok(&cstr[..strz.len()+1]),
-		}
-	}
+    fn ref_cstr_at(&'data self, fp: FP<[CChar]>, maxlen: Option<u32>) -> Result<&'data [CChar]> {
+        let start = fp.get() as usize;
+        let end = maxlen.map(|len| start + len as usize).unwrap_or(self.len());
+        let data = &self[start..end];
+        let cstr = unsafe { transmute::<&[u8], &[CChar]>(data) };
+        match cstr.null_terminated() {
+            None => Err(
+                IoError::new(IoErrorKind::UnexpectedEof, "could not find NULL terminator").into(),
+            ),
+            Some(strz) => Ok(&cstr[..strz.len() + 1]),
+        }
+    }
 }
